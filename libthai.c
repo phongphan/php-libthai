@@ -59,7 +59,7 @@ PHP_FUNCTION(th_brk_new)
 
     ThBrk* brk = th_brk_new((path == NULL || path[0] == '\0') ? NULL : path);
     if (brk == NULL) {
-        // FIXME: Set error state for inquiry
+        php_error_docref(NULL, E_ERROR, "Cannot initialize thbrk!");
         RETURN_FALSE;
     }
     RETURN_RES(zend_register_resource(brk, le_thbrk_context));
