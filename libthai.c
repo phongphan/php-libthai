@@ -51,11 +51,13 @@ PHP_FUNCTION(th_brk_new)
 {
     char* path = NULL;
     size_t path_len;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &path, &path_len) == FAILURE) {
-        return;
-    }
 
-    ThBrk* brk = th_brk_new(path[0] == '\0' ? NULL : path);
+    ZEND_PARSE_PARAMETERS_START(0, 1)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_STRING(path, path_len)
+    ZEND_PARSE_PARAMETERS_END_EX(RETURN_FALSE);
+
+    ThBrk* brk = th_brk_new((path == NULL || path[0] == '\0') ? NULL : path);
     if (brk == NULL) {
         // FIXME: Set error state for inquiry
         RETURN_FALSE;
@@ -70,9 +72,12 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
 {
     zval* res;
     zend_string* input = NULL;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "rS", &res, &input) == FAILURE) {
-        RETURN_FALSE;
-    }
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_RESOURCE(res)
+        Z_PARAM_STR(input)
+    ZEND_PARSE_PARAMETERS_END_EX(RETURN_FALSE);
+
     ThBrk* brk = (ThBrk*)Z_RES_P(res)->ptr;
 
     zend_string* ustr = NULL;
@@ -108,9 +113,12 @@ PHP_FUNCTION(th_brk_wc_split)
 {
     zval* res;
     zend_string* input = NULL;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "rS", &res, &input) == FAILURE) {
-        RETURN_FALSE;
-    }
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_RESOURCE(res)
+        Z_PARAM_STR(input)
+    ZEND_PARSE_PARAMETERS_END_EX(RETURN_FALSE);
+
     ThBrk* brk = Z_RES_P(res)->ptr;
 
     zend_string* ustr = NULL;
@@ -150,9 +158,10 @@ PHP_FUNCTION(th_brk_wc_split)
 PHP_FUNCTION(th_brk_delete)
 {
     zval* res;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "r", &res) == FAILURE) {
-        return;
-    }
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_RESOURCE(res)
+    ZEND_PARSE_PARAMETERS_END_EX(RETURN_FALSE);
 
     ThBrk* brk = Z_RES_P(res)->ptr;
     if (brk != NULL) {
