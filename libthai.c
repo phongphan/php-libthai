@@ -11,8 +11,8 @@
 #include <thai/thbrk.h>
 #include <thai/thwbrk.h>
 
-#include <iconv.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* sharing globals is *evil* */
 static int le_thbrk_context = FAILURE;
@@ -20,12 +20,12 @@ static int le_thbrk_context = FAILURE;
 static const char* input_charset = "UTF-8";
 static const char* internal_charset = "UTF-16LE";
 
-static zend_string* thwchar_substr(thwchar_t* input, int start, int end)
+static zend_string* thwchar_substr_to_utf8(thwchar_t* input, int start, int end)
 {
     int count = end - start;
     int buffer_len = count * 2 + 1;
 
-    char buffer[buffer_len];
+    unsigned char buffer[buffer_len];
     memset(buffer, 0, buffer_len * sizeof(char));
 
     for (int i = 0; i < buffer_len - 1; i += 2) {
@@ -43,6 +43,46 @@ static void thbrk_context_dtor(zend_resource* rsrc)
     if (rsrc->ptr != NULL) {
         th_brk_delete((ThBrk*)rsrc->ptr);
     }
+}
+
+static bool is_high_surrogate(thwchar_t w)
+{
+    return w >= 0xd800 && w <= 0xdbff;
+}
+
+static bool is_low_surrogate(thwchar_t w)
+{
+    return w >= 0xdc00 && w <= 0xdcff;
+}
+
+static int find_breaks(ThBrk* brk, thwchar_t* str, int** pos_ptr, int len)
+{
+    thwchar_t subwchar[len + 1];
+    memset(subwchar, 0, (len + 1) * sizeof(thwchar_t));
+    memmove(subwchar, str, len * sizeof(thwchar_t));
+
+    // libthai always insert marker at the end of it. we also considered the last.
+    return th_brk_wc_find_breaks(brk, subwchar, *pos_ptr, len) + 1;
+}
+
+static void fix_pos_order(int* pos_ptr, bool remove_last)
+{
+    int* pos = pos_ptr;
+    int base = 0; int prev = 0;
+    do {
+        int val = *pos;
+        if (val == 0) {
+            if (remove_last) {
+                *(pos-1) = 0;
+            }
+            break;
+        }
+        if (val < prev) {
+            base = *(pos-1);
+        }
+        prev = val;
+        *pos = base + val;
+    } while (*(pos++) > 0);
 }
 
 /* {{{ proto string th_brk_new(string arg)
@@ -90,15 +130,34 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
     int ustr_len = ZSTR_LEN(ustr) / 2;
     thwchar_t* thwchar = (thwchar_t*)emalloc(ustr_len * sizeof(thwchar_t));
     for (int i = 0; i < ZSTR_LEN(ustr); i += 2) {
-        thwchar[i/2] = (ZSTR_VAL(ustr)[i+1] << 8) + ZSTR_VAL(ustr)[i];
+        thwchar[i/2] = ((ZSTR_VAL(ustr)[i+1] & 0xFF) << 8) + (ZSTR_VAL(ustr)[i] & 0xFF);
     }
 
     int pos[ustr_len];
     memset(pos, 0, ustr_len * sizeof(int));
+    int* pos_ptr = &pos[0];
 
-    int numcut = th_brk_wc_find_breaks(brk, thwchar, pos, ustr_len);
+    int offset = 0;
+    for (int i = 0; i < ustr_len; i++) {
+        if (is_high_surrogate(thwchar[i]) && !(i > 0 && is_low_surrogate(thwchar[i-1]))) {
+            int numcut = find_breaks(brk, thwchar + offset, &pos_ptr, i - offset);
+            pos_ptr += numcut;
+        }
+        else if (is_low_surrogate(thwchar[i])) {
+            *pos_ptr = *(pos_ptr - 1) + 1;
+            pos_ptr++;
+		    offset = i + 1;
+        }
+        else if (i == ustr_len - 1) {
+            find_breaks(brk, thwchar + offset, &pos_ptr, ustr_len - offset);
+        }
+    }
+
+    // Fixed the index
+    fix_pos_order(&pos[0], true);
+
     array_init(return_value);
-    for (int i = 0; i < numcut; i++) {
+    for (int i = 0; pos[i] != 0; i++) {
         add_index_long(return_value, i, pos[i]);
     }
 
@@ -131,22 +190,50 @@ PHP_FUNCTION(th_brk_wc_split)
     int ustr_len = ZSTR_LEN(ustr) / 2;
     thwchar_t* thwchar = (thwchar_t*)emalloc(ustr_len * sizeof(thwchar_t));
     for (int i = 0; i < ZSTR_LEN(ustr); i += 2) {
-        thwchar[i/2] = (ZSTR_VAL(ustr)[i+1] << 8) + ZSTR_VAL(ustr)[i];
+        thwchar[i/2] = ((ZSTR_VAL(ustr)[i+1] & 0xFF) << 8) + (ZSTR_VAL(ustr)[i] & 0xFF);
     }
 
     int pos[ustr_len];
     memset(pos, 0, ustr_len * sizeof(int));
-
-    int numcut = th_brk_wc_find_breaks(brk, thwchar, pos, ustr_len);
-    pos[numcut] = ustr_len; // Add last
+    int* pos_ptr = &pos[0];
 
     array_init(return_value);
-    int prev = 0;
-    for (int i = 0; i < numcut + 1; i++) {
-        zend_string* out = thwchar_substr(thwchar, prev, pos[i]);
-        add_index_stringl(return_value, i, ZSTR_VAL(out), ZSTR_LEN(out));
-        zend_string_free(out);
-        prev = pos[i];
+
+    int idx = 0; int offset = 0; thwchar_t* wptr = thwchar;
+    for (int i = 0; i < ustr_len; i++) {
+        if (is_high_surrogate(thwchar[i]) && !(i > 0 && is_low_surrogate(thwchar[i-1]))) {
+            int numcut = find_breaks(brk, wptr, &pos_ptr, i - offset);
+            int prev = 0;
+            for (int j = 0; j < numcut; j++) {
+                int next = *(pos_ptr + j); int size = next - prev;
+
+                zend_string* out = thwchar_substr_to_utf8(wptr, 0, size);
+                add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
+                zend_string_free(out);
+
+                wptr += size; prev = next;
+            }
+        }
+        else if (is_low_surrogate(thwchar[i])) {
+            zend_string* out = thwchar_substr_to_utf8(wptr, 0, 2);
+            add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
+            zend_string_free(out);
+            wptr += 2;
+		    offset = i + 1;
+        }
+        else if (i == ustr_len - 1) {
+            int numcut = find_breaks(brk, wptr, &pos_ptr, ustr_len - offset);
+            int prev = 0;
+            for (int j = 0; j < numcut; j++) {
+                int next = *(pos_ptr + j); int size = next - prev;
+
+                zend_string* out = thwchar_substr_to_utf8(wptr, 0, size);
+                add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
+                zend_string_free(out);
+
+                wptr += size; prev = next;
+            }
+        }
     }
 
     zend_string_free(ustr);
