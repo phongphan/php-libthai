@@ -64,10 +64,10 @@ static int find_breaks(ThBrk* brk, thwchar_t* str, int** pos_ptr, int len)
     return th_brk_wc_find_breaks(brk, subwchar, *pos_ptr, len) + 1;
 }
 
-static void fix_pos_order(int* pos_ptr, bool remove_last)
+static void fix_pos_order(int* start_ptr, int* pos_ptr, bool remove_last)
 {
     int* pos = pos_ptr;
-    int base = 0; int prev = 0;
+    int base = pos_ptr == start_ptr ? 0 : *(pos_ptr - 1);
     do {
         int val = *pos;
         if (val == 0) {
@@ -76,10 +76,6 @@ static void fix_pos_order(int* pos_ptr, bool remove_last)
             }
             break;
         }
-        if (val < prev) {
-            base = *(pos-1);
-        }
-        prev = val;
         *pos = base + val;
     } while (*(pos++) > 0);
 }
@@ -140,6 +136,7 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
     for (int i = 0; i < ustr_len; i++) {
         if (is_high_surrogate(thwchar[i]) && !(i > 0 && is_low_surrogate(thwchar[i-1]))) {
             int numcut = find_breaks(brk, thwchar + offset, &pos_ptr, i - offset);
+            fix_pos_order(&pos[0], pos_ptr, false);
             pos_ptr += numcut;
         }
         else if (is_low_surrogate(thwchar[i])) {
@@ -151,9 +148,7 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
             find_breaks(brk, thwchar + offset, &pos_ptr, ustr_len - offset);
         }
     }
-
-    // Fixed the index
-    fix_pos_order(&pos[0], true);
+    fix_pos_order(&pos[0], pos_ptr, true);
 
     array_init(return_value);
     for (int i = 0; pos[i] != 0; i++) {
