@@ -80,6 +80,13 @@ static void fix_pos_order(int* start_ptr, int* pos_ptr, bool remove_last)
     } while (*(pos++) > 0);
 }
 
+static void add_index_string_to_utf8(zval* array, int array_index, thwchar_t* input, int size)
+{
+    zend_string* out = thwchar_substr_to_utf8(input, 0, size);
+    add_index_stringl(array, array_index, ZSTR_VAL(out), ZSTR_LEN(out));
+    zend_string_free(out);
+}
+
 /* {{{ proto string th_brk_new(string arg)
    Return a pointer to th_brk struct */
 PHP_FUNCTION(th_brk_new)
@@ -118,7 +125,7 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
     zend_string* ustr = NULL;
     php_iconv_err_t err = php_iconv_string(ZSTR_VAL(input), (size_t)ZSTR_LEN(input), &ustr, internal_charset, input_charset);
     if (err != PHP_ICONV_ERR_SUCCESS || ustr == NULL) {
-        zend_string_free(ustr);
+        if (ustr != NULL) zend_string_free(ustr);
         RETURN_FALSE;
     }
 
@@ -142,7 +149,7 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
         else if (is_low_surrogate(thwchar[i])) {
             *pos_ptr = *(pos_ptr - 1) + 1;
             pos_ptr++;
-		    offset = i + 1;
+            offset = i + 1;
         }
         else if (i == ustr_len - 1) {
             find_breaks(brk, thwchar + offset, &pos_ptr, ustr_len - offset);
@@ -177,7 +184,7 @@ PHP_FUNCTION(th_brk_wc_split)
     zend_string* ustr = NULL;
     php_iconv_err_t err = php_iconv_string(ZSTR_VAL(input), (size_t)ZSTR_LEN(input), &ustr, internal_charset, input_charset);
     if (err != PHP_ICONV_ERR_SUCCESS || ustr == NULL) {
-        zend_string_free(ustr);
+        if (ustr != NULL) zend_string_free(ustr);
         RETURN_FALSE;
     }
 
@@ -200,31 +207,20 @@ PHP_FUNCTION(th_brk_wc_split)
             int prev = 0;
             for (int j = 0; j < numcut; j++) {
                 int next = *(pos_ptr + j); int size = next - prev;
-
-                zend_string* out = thwchar_substr_to_utf8(wptr, 0, size);
-                add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
-                zend_string_free(out);
-
+                add_index_string_to_utf8(return_value, idx++, wptr, size);
                 wptr += size; prev = next;
             }
         }
         else if (is_low_surrogate(thwchar[i])) {
-            zend_string* out = thwchar_substr_to_utf8(wptr, 0, 2);
-            add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
-            zend_string_free(out);
-            wptr += 2;
-		    offset = i + 1;
+            add_index_string_to_utf8(return_value, idx++, wptr, 2);
+            wptr += 2; offset = i + 1;
         }
         else if (i == ustr_len - 1) {
             int numcut = find_breaks(brk, wptr, &pos_ptr, ustr_len - offset);
             int prev = 0;
             for (int j = 0; j < numcut; j++) {
                 int next = *(pos_ptr + j); int size = next - prev;
-
-                zend_string* out = thwchar_substr_to_utf8(wptr, 0, size);
-                add_index_stringl(return_value, idx++, ZSTR_VAL(out), ZSTR_LEN(out));
-                zend_string_free(out);
-
+                add_index_string_to_utf8(return_value, idx++, wptr, size);
                 wptr += size; prev = next;
             }
         }
@@ -288,7 +284,7 @@ const zend_function_entry libthai_functions[] = {
     PHP_FE(th_brk_delete, NULL)
     PHP_FE(th_brk_wc_find_breaks, NULL)
     PHP_FE(th_brk_wc_split, NULL)
-    PHP_FE_END	/* Must be the last line in libthai_functions[] */
+    PHP_FE_END /* Must be the last line in libthai_functions[] */
 };
 /* }}} */
 
