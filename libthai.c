@@ -14,7 +14,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* sharing globals is *evil* */
 static int le_thbrk_context = FAILURE;
 
 static const char* input_charset = "UTF-8";
@@ -33,7 +32,7 @@ static zend_string* thwchar_substr_to_utf8(thwchar_t* input, int start, int end)
         buffer[i+1] = input[start+i/2] >> 8;
     }
     zend_string* out = NULL;
-    php_iconv_string(buffer, (size_t)buffer_len, &out, input_charset, internal_charset);
+    php_iconv_string((const char*)buffer, (size_t)buffer_len, &out, input_charset, internal_charset);
 
     return out;
 }
