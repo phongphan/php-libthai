@@ -160,8 +160,8 @@ PHP_FUNCTION(th_brk_wc_find_breaks)
         add_index_long(return_value, i, pos[i]);
     }
 
-    zend_string_free(ustr);
     efree(thwchar);
+    zend_string_free(ustr);
 }
 /* }}} */
 
@@ -235,8 +235,8 @@ PHP_FUNCTION(th_brk_wc_split)
         }
     }
 
-    zend_string_free(ustr);
     efree(thwchar);
+    zend_string_free(ustr);
 }
 /* }}} */
 
